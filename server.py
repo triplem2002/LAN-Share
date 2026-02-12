@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import os
-import posixpath
 import urllib.parse
 import html
 import configparser
@@ -9,6 +8,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 CONFIG_PATH = "./config.ini"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MAX_UPLOAD_SIZE = 1024 * 1024 * 1024
 
 config = configparser.ConfigParser()
 if not config.read(CONFIG_PATH):
@@ -156,6 +156,79 @@ class CustomHTTPRequestHandler(SimpleHTTPRequestHandler):
                 break
             outputfile.write(buf)
             remaining -= len(buf)
+
+    def do_POST(self):
+        path = self.translate_path(self.path)
+
+        if not os.path.isdir(path):
+            self.send_error(400, "Upload target is not a directory")
+            return
+
+        content_length = int(self.headers.get('Content-Length', 0))
+
+        if content_length > MAX_UPLOAD_SIZE:
+            self.send_error(413, "File too large (max 1GB)")
+            return
+
+        content_type = self.headers.get("Content-Type")
+        if not content_type or "multipart/form-data" not in content_type:
+            self.send_error(400, "Invalid content type")
+            return
+
+        boundary = content_type.split("boundary=")[-1].encode()
+        boundary = b"--" + boundary
+
+        remaining = content_length
+        line = self.rfile.readline()
+        remaining -= len(line)
+
+        if boundary not in line:
+            self.send_error(400, "Content does not start with boundary")
+            return
+
+        line = self.rfile.readline()
+        remaining -= len(line)
+
+        disposition = line.decode()
+        if "filename=" not in disposition:
+            self.send_error(400, "No file uploaded")
+            return
+
+        filename = disposition.split("filename=")[-1].strip()
+        filename = filename.strip('"')
+        filename = os.path.basename(filename)
+
+        line = self.rfile.readline()
+        remaining -= len(line)
+
+        line = self.rfile.readline()
+        remaining -= len(line)
+
+        file_path = os.path.join(path, filename)
+
+        try:
+            with open(file_path, "wb") as output_file:
+                prev_line = self.rfile.readline()
+                remaining -= len(prev_line)
+
+                while remaining > 0:
+                    line = self.rfile.readline()
+                    remaining -= len(line)
+
+                    if boundary in line:
+                        output_file.write(prev_line.rstrip(b"\r\n"))
+                        break
+                    else:
+                        output_file.write(prev_line)
+                        prev_line = line
+
+        except OSError:
+            self.send_error(500, "Failed to save file")
+            return
+
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Upload successful")
 
 def run():
     server = ThreadingHTTPServer(("0.0.0.0", PORT), CustomHTTPRequestHandler)
