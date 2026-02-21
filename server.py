@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
+from fileinput import filename
 import os
+from os import path
+from os import path
 import urllib.parse
 import html
 import configparser
@@ -204,7 +207,16 @@ class CustomHTTPRequestHandler(SimpleHTTPRequestHandler):
         line = self.rfile.readline()
         remaining -= len(line)
 
-        file_path = os.path.join(path, filename)
+        base_name, extension = os.path.splitext(filename)
+        new_filename = filename
+        counter = 2
+
+        file_path = os.path.join(path, new_filename)
+
+        while os.path.exists(file_path):
+            new_filename = f"{base_name}({counter}){extension}"
+            file_path = os.path.join(path, new_filename)
+            counter += 1
 
         try:
             with open(file_path, "wb") as output_file:
