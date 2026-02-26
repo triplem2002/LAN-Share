@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 
-from fileinput import filename
 import os
-from os import path
-from os import path
 import urllib.parse
 import html
 import configparser
@@ -11,7 +8,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 CONFIG_PATH = "./config.ini"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MAX_UPLOAD_SIZE = 1024 * 1024 * 1024
+MAX_UPLOAD_SIZE = 5 * 1073741824
 
 config = configparser.ConfigParser()
 if not config.read(CONFIG_PATH):
@@ -27,7 +24,7 @@ if not config.read(CONFIG_PATH):
         "HOSTED_DIRECTORY": os.path.join(BASE_DIR, "Files"),
         "TEMPLATE_PATH": "index.html",
         "PORT": "8000",
-        "DEFAULT_BLOCK_SIZE": "128"
+        "DEFAULT_BLOCK_SIZE": "32768"
     }
 
     with open(CONFIG_PATH, "w") as f:
@@ -149,16 +146,30 @@ class CustomHTTPRequestHandler(SimpleHTTPRequestHandler):
 
         return f
 
-    def copy_file_range(self, source, outputfile, length):
+    def copyfile(self, source, outputfile):
+        try:
+            while True:
+                buf = source.read(DEFAULT_BLOCK_SIZE)
+                if not buf:
+                    break
+                outputfile.write(buf)
+                outputfile.flush()
+        except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
+            print("Client disconnected during file transfer")
 
+    def copy_file_range(self, source, outputfile, length):
         remaining = length
-        while remaining > 0:
-            read_length = min(DEFAULT_BLOCK_SIZE, remaining)
-            buf = source.read(read_length)
-            if not buf:
-                break
-            outputfile.write(buf)
-            remaining -= len(buf)
+        try:
+            while remaining > 0:
+                read_length = min(DEFAULT_BLOCK_SIZE, remaining)
+                buf = source.read(read_length)
+                if not buf:
+                    break
+                outputfile.write(buf)
+                outputfile.flush()
+                remaining -= len(buf)
+        except (ConnectionResetError, BrokenPipeError, ConnectionAbortedError):
+            pass
 
     def do_POST(self):
         path = self.translate_path(self.path)
@@ -170,7 +181,7 @@ class CustomHTTPRequestHandler(SimpleHTTPRequestHandler):
         content_length = int(self.headers.get('Content-Length', 0))
 
         if content_length > MAX_UPLOAD_SIZE:
-            self.send_error(413, "File too large (max 1GB)")
+            self.send_error(413, "File too large (max 5GB)")
             return
 
         content_type = self.headers.get("Content-Type")
